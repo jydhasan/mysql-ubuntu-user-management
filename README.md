@@ -288,3 +288,108 @@ Application Role (RBAC)
 আমার পরামর্শ: যদি `Tenancy` বলতে একাধিক company-র জন্য একটি application বোঝান, তাহলে প্রতিটি application user-কে আলাদা MySQL account না দিয়ে সাধারণত application-level RBAC ব্যবহার করা হয়। Database-এর connection user সীমিত permission-সহ রাখা হয় এবং application প্রতিটি company-র data আলাদাভাবে নিয়ন্ত্রণ করে।
 
 আপনি কি একটি database-এর মধ্যে Admin, Accountant, Auditor, Viewer-এর মতো user role তৈরি করতে চান, নাকি একাধিক company-র জন্য আলাদা tenant এবং তাদের নিজস্ব user/role তৈরি করতে চান? দুটির architecture আলাদা।
+ঠিক আছে। আপনার শুধু MySQL Database Role দরকার। অর্থাৎ একই `tenancy_db` database-এর একাধিক user থাকবে এবং প্রত্যেকের permission আলাদা হবে। Application-level role লাগবে না।
+
+আপনার MySQL 8.4.11 অনুযায়ী এই SQL-গুলো ব্যবহার করুন।
+
+## ১. Root হিসেবে লগইন করুন
+
+Ubuntu terminal-এ:
+
+```
+sudo mysql
+```
+
+## ২. Database Role তৈরি করুন
+
+```
+CREATE ROLE IF NOT EXISTS 'db_admin';
+CREATE ROLE IF NOT EXISTS 'db_editor';
+CREATE ROLE IF NOT EXISTS 'db_auditor';
+CREATE ROLE IF NOT EXISTS 'db_viewer';
+```
+
+## ৩. Role অনুযায়ী Permission দিন
+
+সব permission শুধু `tenancy_db` database-এর মধ্যে সীমাবদ্ধ থাকবে।
+
+```
+-- Admin: database-এর সব privilege
+GRANT ALL PRIVILEGES ON tenancy_db.* TO 'db_admin';
+
+-- Editor: data দেখা, যোগ করা ও পরিবর্তন করা
+GRANT SELECT, INSERT, UPDATE ON tenancy_db.* TO 'db_editor';
+
+-- Auditor: শুধু data দেখা
+GRANT SELECT ON tenancy_db.* TO 'db_auditor';
+
+-- Viewer: শুধু data দেখা
+GRANT SELECT ON tenancy_db.* TO 'db_viewer';
+```
+
+মনে রাখবেন, `db_admin`-এর `ALL PRIVILEGES`-এ database-level `DROP` ও `ALTER`-এর মতো ক্ষমতাও থাকবে।
+
+## ৪. User তৈরি করুন
+
+```
+CREATE USER 'admin1'@'localhost'
+IDENTIFIED BY 'Admin_Strong_123!';
+
+CREATE USER 'editor1'@'localhost'
+IDENTIFIED BY 'Editor_Strong_123!';
+
+CREATE USER 'auditor1'@'localhost'
+IDENTIFIED BY 'Auditor_Strong_123!';
+
+CREATE USER 'viewer1'@'localhost'
+IDENTIFIED BY 'Viewer_Strong_123!';
+```
+
+## ৫. User-দের Role দিন
+
+```
+GRANT 'db_admin' TO 'admin1'@'localhost';
+GRANT 'db_editor' TO 'editor1'@'localhost';
+GRANT 'db_auditor' TO 'auditor1'@'localhost';
+GRANT 'db_viewer' TO 'viewer1'@'localhost';
+```
+
+প্রত্যেকের assigned role স্বয়ংক্রিয়ভাবে সক্রিয় করতে:
+
+```
+SET DEFAULT ROLE ALL TO 'admin1'@'localhost';
+SET DEFAULT ROLE ALL TO 'editor1'@'localhost';
+SET DEFAULT ROLE ALL TO 'auditor1'@'localhost';
+SET DEFAULT ROLE ALL TO 'viewer1'@'localhost';
+```
+
+## ৬. যাচাই করুন
+
+```
+SHOW GRANTS FOR 'db_admin';
+SHOW GRANTS FOR 'db_editor';
+SHOW GRANTS FOR 'db_auditor';
+SHOW GRANTS FOR 'db_viewer';
+```
+
+নির্দিষ্ট user-এর role যাচাই করতে:
+
+```
+SHOW GRANTS FOR 'auditor1'@'localhost';
+```
+
+## ৭. Role পরিবর্তন বা বাতিল
+
+কোনো user-কে অন্য role দিতে:
+
+```
+GRANT 'db_auditor' TO 'editor1'@'localhost';
+```
+
+কোনো role সরাতে:
+
+```
+REVOKE 'db_editor' FROM 'editor1'@'localhost';
+```
+
+গুরুত্বপূর্ণ: এই উদাহরণের password-গুলো নমুনা। বাস্তবে ব্যবহার করলে নিজের শক্তিশালী password দিন। আর `tenancy_user`-এর বর্তমান permission অপরিবর্তিত থাকবে; আলাদাভাবে পরিবর্তন না করলে সেটি আগের মতোই কাজ করবে।
